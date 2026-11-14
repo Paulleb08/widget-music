@@ -67,7 +67,11 @@ jobs:
               set p to make new user playlist with properties {name:"CI"}
               add POSIX file "$PWD/t1.m4a" to p
               add POSIX file "$PWD/t2.m4a" to p
-              delay 3
+              repeat 40 times -- the import is asynchronous: wait for both tracks
+                  if (count of tracks of p) is 2 then exit repeat
+                  delay 0.5
+              end repeat
+              delay 1
               play p
           end tell
           OSA
