@@ -10,6 +10,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: swiftc --version
+      - name: Build with the Command Line Tools only (no full Xcode, like most users)
+        run: |
+          ls /Library/Developer/CommandLineTools/usr/bin/swiftc
+          DEVELOPER_DIR=/Library/Developer/CommandLineTools swiftc --version
+          DEVELOPER_DIR=/Library/Developer/CommandLineTools swiftc -O main.swift -o /tmp/clt-build
       - run: ./build.sh
       - name: Smoke test (the app must still be running after 8 s)
         run: |
