@@ -16,9 +16,27 @@ jobs:
           sleep 8
           pgrep -x MusicWidget
           screencapture -x shot.png || true
+      - name: Hover and colored-style screenshots (best effort)
+        continue-on-error: true
+        run: |
+          cat > hover.swift <<'SWIFT'
+          import CoreGraphics
+          import Foundation
+          for x in [480.0, 500, 512] {
+              CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                      mouseCursorPosition: CGPoint(x: x, y: 250), mouseButton: .left)?
+                  .post(tap: .cghidEventTap)
+              usleep(300_000)
+          }
+          SWIFT
+          swiftc hover.swift -o hover
+          ./hover && sleep 1 && screencapture -x shot-hover.png
+          pkill -x MusicWidget
+          defaults write local.musicwidget style color
+          open MusicWidget.app && sleep 4 && ./hover && sleep 1 && screencapture -x shot-color-hover.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: screenshot-${{ matrix.os }}
-          path: shot.png
+          path: shot*.png
           if-no-files-found: ignore
