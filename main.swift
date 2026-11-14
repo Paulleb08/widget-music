@@ -190,6 +190,7 @@ struct WidgetView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         }
         .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)  // keeps the gear white on the dark scrim
     }
 
     private func button(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {
