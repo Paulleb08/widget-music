@@ -82,7 +82,13 @@ jobs:
           ./mouse click 512 246; sleep 2; expect play "playing | Test Track 1"
           ./mouse click 570 246; sleep 3; expect next "playing | Test Track 2"
           ./mouse move 900 650; sleep 1; screencapture -x shot-track2.png
-          ./mouse click 454 246; sleep 3; expect previous "playing | Test Track 1"
+          # Like Music's own button, "previous" restarts the track once it is a few seconds in.
+          sleep 4
+          before=$(osascript -e 'tell application "Music" to return (player position as integer)')
+          ./mouse click 454 246; sleep 1
+          after=$(osascript -e 'tell application "Music" to return (player position as integer)')
+          echo "STATE after previous: $(state), position $before -> $after"
+          [[ "$(state)" == "playing | Test Track 1" || "$after" -lt "$before" ]] || { echo "FAIL: previous did nothing"; exit 1; }
 
           pkill -x MusicWidget
           defaults write local.musicwidget style color
