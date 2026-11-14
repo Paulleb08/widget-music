@@ -1,0 +1,24 @@
+name: build
+on: push
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: swiftc --version
+      - run: ./build.sh
+      - name: Smoke test (the app must still be running after 8 s)
+        run: |
+          sleep 8
+          pgrep -x MusicWidget
+          screencapture -x shot.png || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-${{ matrix.os }}
+          path: shot.png
+          if-no-files-found: ignore
