@@ -18,6 +18,8 @@ final class NowPlaying: ObservableObject {
     @Published var artist = ""
     @Published var playing = false
     @Published var cover: NSImage?
+    // Not @State: its macro plugin ships only with full Xcode, not the Command Line Tools.
+    @Published var hover = false
     private var coverKey = ""
 
     init() {
@@ -107,7 +109,6 @@ struct Backdrop: ViewModifier {
 struct WidgetView: View {
     @ObservedObject var np: NowPlaying
     @AppStorage("style") private var style = "glass"
-    @State private var hover = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -120,7 +121,7 @@ struct WidgetView: View {
                 }
             }
             .frame(width: 200, height: 200)
-            .overlay { controls.opacity(hover ? 1 : 0) }
+            .overlay { controls.opacity(np.hover ? 1 : 0) }
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             VStack(spacing: 2) {
@@ -132,7 +133,7 @@ struct WidgetView: View {
         }
         .padding(12)
         .modifier(Backdrop(colored: style == "color", cover: np.cover))
-        .onHover { inside in withAnimation(.easeInOut(duration: 0.15)) { hover = inside } }
+        .onHover { inside in withAnimation(.easeInOut(duration: 0.15)) { np.hover = inside } }
     }
 
     private var controls: some View {
