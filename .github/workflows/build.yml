@@ -90,8 +90,27 @@ jobs:
           echo "STATE after previous: $(state), position $before -> $after"
           [[ "$(state)" == "playing | Test Track 1" || "$after" -lt "$before" ]] || { echo "FAIL: previous did nothing"; exit 1; }
 
-          pkill -x MusicWidget
-          defaults write local.musicwidget style color
+          # Pick "Coloré" through the gear menu itself: click the gear, then down, down, return.
+          cat > key.swift <<'SWIFT'
+          import CoreGraphics
+          import Foundation
+          for code in CommandLine.arguments.dropFirst() {
+              for down in [true, false] {
+                  CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(code)!, keyDown: down)?
+                      .post(tap: .cghidEventTap)
+                  usleep(150_000)
+              }
+          }
+          SWIFT
+          swiftc key.swift -o key
+          [[ "$(defaults read local.musicwidget style 2>/dev/null)" != color ]]
+          ./mouse click 592 162; sleep 1; screencapture -x shot-menu.png
+          ./key 125 125; sleep 1; screencapture -x shot-menu-selected.png
+          ./key 36; sleep 2
+          style=$(defaults read local.musicwidget style); echo "STYLE after menu: $style"
+          [[ "$style" == color ]] || { echo "FAIL: style not changed by the menu"; exit 1; }
+          ./mouse move 900 650; sleep 1; screencapture -x shot-color-live.png
+          pkill -x MusicWidget  # relaunch: the choice must persist
           open MusicWidget.app; sleep 5
           screencapture -x shot-color.png
           ./mouse move 512 246; sleep 1; screencapture -x shot-color-hover.png
