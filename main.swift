@@ -1,6 +1,6 @@
 import SwiftUI
 
-let players = ["com.spotify.client", "com.apple.Music"]
+let music = "com.apple.Music"
 
 func osa(_ source: String) -> NSAppleEventDescriptor? {
     var error: NSDictionary?
@@ -8,9 +8,9 @@ func osa(_ source: String) -> NSAppleEventDescriptor? {
     return error == nil ? result : nil
 }
 
-// Never script an app that isn't running: AppleScript would launch it.
-func isRunning(_ id: String) -> Bool {
-    !NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty
+// Never script Music when it isn't running: AppleScript would launch it.
+func musicIsRunning() -> Bool {
+    !NSRunningApplication.runningApplications(withBundleIdentifier: music).isEmpty
 }
 
 final class NowPlaying: ObservableObject {
@@ -18,77 +18,54 @@ final class NowPlaying: ObservableObject {
     @Published var artist = ""
     @Published var playing = false
     @Published var cover: NSImage?
-    private var player = players[0]
     private var coverKey = ""
 
     init() {
-        // Both apps broadcast on every track/state change, so no polling is needed.
-        let names = ["com.spotify.client.PlaybackStateChanged", "com.apple.Music.playerInfo"]
-        for (name, id) in zip(names, players) {
-            DistributedNotificationCenter.default().addObserver(
-                forName: .init(name), object: nil, queue: .main
-            ) { [weak self] note in
-                // "Stopped" is also sent on quit; scripting the app then would relaunch it.
-                self?.refresh(id, stopped: note.userInfo?["Player State"] as? String == "Stopped")
-            }
+        // Music broadcasts on every track/state change, so no polling is needed.
+        DistributedNotificationCenter.default().addObserver(
+            forName: .init("com.apple.Music.playerInfo"), object: nil, queue: .main
+        ) { [weak self] note in
+            // "Stopped" is also sent on quit; scripting Music then would relaunch it.
+            self?.refresh(stopped: note.userInfo?["Player State"] as? String == "Stopped")
         }
-        for id in players {
-            refresh(id)
-            if playing { break }
-        }
+        refresh()
     }
 
     func send(_ command: String) {
-        guard isRunning(player) else { return }
-        _ = osa("tell application id \"\(player)\" to \(command)")
+        guard musicIsRunning() else { return }
+        _ = osa("tell application id \"\(music)\" to \(command)")
     }
 
-    private func refresh(_ id: String, stopped: Bool = false) {
-        let art = id == players[0] ? "artwork url of current track" : "\"\""
+    private func refresh(stopped: Bool = false) {
         let script = """
-        tell application id "\(id)"
+        tell application id "\(music)"
             if player state is stopped then return ""
-            return (name of current track) & linefeed & (artist of current track) & linefeed & (player state as text) & linefeed & \(art)
+            return (name of current track) & linefeed & (artist of current track) & linefeed & (player state as text)
         end tell
         """
-        let parts = !stopped && isRunning(id)
+        let parts = !stopped && musicIsRunning()
             ? (osa(script)?.stringValue ?? "").components(separatedBy: "\n") : []
-        guard parts.count == 4 else {
-            if id == player {
-                title = ""; artist = ""; playing = false; cover = nil; coverKey = ""
-            }
+        guard parts.count == 3 else {
+            title = ""; artist = ""; playing = false; cover = nil; coverKey = ""
             return
         }
-        let isPlaying = parts[2] == "playing"
-        // A paused player must not steal the widget from the one being listened to.
-        guard isPlaying || id == player || title.isEmpty else { return }
-        player = id
         title = parts[0]
         artist = parts[1]
-        playing = isPlaying
-        let trackKey = id + parts[0] + parts[1] + parts[3]
-        if trackKey != coverKey {
-            coverKey = trackKey
-            loadCover(id, parts[3], key: trackKey)
+        playing = parts[2] == "playing"
+        let key = parts[0] + "\n" + parts[1]
+        if key != coverKey {
+            coverKey = key
+            loadCover(key: key)
         }
     }
 
-    private func loadCover(_ id: String, _ urlString: String, key: String, retry: Bool = true) {
-        if !urlString.isEmpty, let url = URL(string: urlString) {
-            URLSession.shared.dataTask(with: url) { data, _, _ in
-                let image = data.flatMap { NSImage(data: $0) }
-                DispatchQueue.main.async { if self.coverKey == key { self.cover = image } }
-            }.resume()
-            return
-        }
-        cover = osa("tell application id \"\(id)\" to get raw data of artwork 1 of current track")
+    private func loadCover(key: String, retry: Bool = true) {
+        cover = osa("tell application id \"\(music)\" to get raw data of artwork 1 of current track")
             .flatMap { NSImage(data: $0.data) }
         // Music often has no artwork yet when a streamed track starts: try once more.
         if cover == nil, retry {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                if self.coverKey == key, isRunning(id) {
-                    self.loadCover(id, urlString, key: key, retry: false)
-                }
+                if self.coverKey == key, musicIsRunning() { self.loadCover(key: key, retry: false) }
             }
         }
     }
