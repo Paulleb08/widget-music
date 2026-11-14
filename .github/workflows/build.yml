@@ -16,24 +16,80 @@ jobs:
           sleep 8
           pgrep -x MusicWidget
           screencapture -x shot.png || true
-      - name: Hover and colored-style screenshots (best effort)
-        continue-on-error: true
+      - name: Playback test (real tracks in Music, real clicks on the widget)
+        timeout-minutes: 6
         run: |
-          cat > hover.swift <<'SWIFT'
+          set -x
+          cat > mouse.swift <<'SWIFT'
           import CoreGraphics
           import Foundation
-          for x in [480.0, 500, 512] {
-              CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
-                      mouseCursorPosition: CGPoint(x: x, y: 250), mouseButton: .left)?
+          let a = CommandLine.arguments
+          let p = CGPoint(x: Double(a[2])!, y: Double(a[3])!)
+          func post(_ t: CGEventType, _ at: CGPoint) {
+              CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: at, mouseButton: .left)?
                   .post(tap: .cghidEventTap)
               usleep(300_000)
           }
+          post(.mouseMoved, CGPoint(x: p.x - 15, y: p.y))
+          post(.mouseMoved, p)
+          if a[1] == "click" { post(.leftMouseDown, p); post(.leftMouseUp, p) }
           SWIFT
-          swiftc hover.swift -o hover
-          ./hover && sleep 1 && screencapture -x shot-hover.png
+          swiftc mouse.swift -o mouse
+
+          # Two 60 s test tracks with distinct embedded covers.
+          python3 -m venv venv && venv/bin/pip -q install mutagen
+          venv/bin/python - <<'PY'
+          import math, struct, subprocess, wave, zlib
+          from mutagen.mp4 import MP4, MP4Cover
+          def png(path, c1, c2, n=300):
+              rows = b''.join(b'\0' + b''.join(bytes(int(c1[c] + (c2[c] - c1[c]) * (x + y) / (2 * n)) for c in range(3)) for x in range(n)) for y in range(n))
+              ch = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d))
+              open(path, 'wb').write(b'\x89PNG\r\n\x1a\n' + ch(b'IHDR', struct.pack('>IIBBBBB', n, n, 8, 2, 0, 0, 0)) + ch(b'IDAT', zlib.compress(rows)) + ch(b'IEND', b''))
+          for n, f, c1, c2 in ((1, 440, (255, 60, 0), (255, 220, 0)), (2, 660, (0, 90, 255), (0, 230, 160))):
+              w = wave.open(f't{n}.wav', 'w'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(22050)
+              w.writeframes(b''.join(struct.pack('<h', int(3000 * math.sin(2 * math.pi * f * i / 22050))) for i in range(22050 * 60))); w.close()
+              subprocess.run(['afconvert', '-f', 'm4af', '-d', 'aac', f't{n}.wav', f't{n}.m4a'], check=True)
+              png(f'c{n}.png', c1, c2)
+              m = MP4(f't{n}.m4a'); m['\xa9nam'] = [f'Test Track {n}']; m['\xa9ART'] = ['CI Artist']
+              m['covr'] = [MP4Cover(open(f'c{n}.png', 'rb').read(), imageformat=MP4Cover.FORMAT_PNG)]; m.save()
+          PY
+
+          # CI only: pre-approve the Automation prompt nobody can click on a headless runner.
+          TCC="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+          sqlite3 "$TCC" "select service,client,client_type,auth_value,indirect_object_identifier from access where service='kTCCServiceAppleEvents'" || true
+          sqlite3 "$TCC" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,indirect_object_identifier_type,indirect_object_identifier,flags,last_modified) SELECT DISTINCT service,client,client_type,2,auth_reason,auth_version,csreq,0,'com.apple.Music',flags,last_modified FROM access WHERE service='kTCCServiceAppleEvents'"
+          sqlite3 "$TCC" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,indirect_object_identifier_type,indirect_object_identifier,flags,last_modified) VALUES ('kTCCServiceAppleEvents','local.musicwidget',0,2,3,1,0,'com.apple.Music',0,strftime('%s','now'))"
+
+          osascript <<OSA
+          tell application "Music"
+              launch
+              delay 6
+              set p to make new user playlist with properties {name:"CI"}
+              add POSIX file "$PWD/t1.m4a" to p
+              add POSIX file "$PWD/t2.m4a" to p
+              delay 3
+              play p
+          end tell
+          OSA
+          state() { osascript -e 'tell application "Music" to return (player state as text) & " | " & (name of current track)'; }
+          expect() { s=$(state); echo "STATE after $1: $s"; [[ "$s" == $2 ]] || { echo "FAIL: expected $2"; screencapture -x "shot-fail-$1.png"; exit 1; }; }
+          sleep 5
+          expect start "playing | Test Track 1"
+          ./mouse move 900 650; sleep 1; screencapture -x shot-playing.png
+          ./mouse move 512 246; sleep 1; screencapture -x shot-playing-hover.png
+          ./mouse click 512 246; sleep 2; expect pause "paused | Test Track 1"
+          screencapture -x shot-paused-hover.png
+          ./mouse click 512 246; sleep 2; expect play "playing | Test Track 1"
+          ./mouse click 570 246; sleep 3; expect next "playing | Test Track 2"
+          ./mouse move 900 650; sleep 1; screencapture -x shot-track2.png
+          ./mouse click 454 246; sleep 3; expect previous "playing | Test Track 1"
+
           pkill -x MusicWidget
           defaults write local.musicwidget style color
-          open MusicWidget.app && sleep 4 && ./hover && sleep 1 && screencapture -x shot-color-hover.png
+          open MusicWidget.app; sleep 5
+          screencapture -x shot-color.png
+          ./mouse move 512 246; sleep 1; screencapture -x shot-color-hover.png
+          echo "PLAYBACK TEST PASSED"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
